@@ -13,6 +13,16 @@
 #define COL_ORIGIN_AIRPORT 17
 #define COL_DESTINATION_AIRPORT 18
 #define F 2
+#define N 10
+
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+struct args
+  {
+    FILE* fp;
+    int **num_flights;
+    char **airports;
+  };
 
 /**
  * Reserva espacio para una matriz de tamaño nrow x ncol,
@@ -254,35 +264,45 @@ int extract_fields_airport(char *origin, char *destination, char *line)
  * para saber cuantos vuelos hay entre cada cuidad origen y destino.
  */ 
 
-void read_airports_data(int **num_flights, char **airports, char *fname) 
+void* read_airports_data(void *arg) 
 {
   char line[MAXCHAR];
   char origin[STR_CODE_AIRPORT], destination[STR_CODE_AIRPORT];
   int invalid, index_origin, index_destination;
 
-  FILE *fp;
 
-  fp = fopen(fname, "r");
-  if (!fp) {
-    printf("ERROR: could not open '%s'\n", fname);
-    exit(1);
-  }
+  struct args *arg_pt = (struct args *) arg;
 
 
-  while (fgets(line, MAXCHAR, fp) != NULL)
-  {
-    invalid = extract_fields_airport(origin, destination, line);
+  //N definido en la cabecera
 
-    if (!invalid) {
-      index_origin = get_index_airport(origin, airports);
-      index_destination = get_index_airport(destination, airports);
+  /* Leemos N lineas siempre y cuando no nos salgamos del fichero.
+     En caso de salirnos del fichero, paramos el bucle*/
 
-      if ((index_origin >= 0) && (index_destination >= 0))
-        num_flights[index_origin][index_destination]++;
+  while (!feof(arg_pt->fp)){ //Repetir hasta que el fichero se acabe
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < N; i++){
+      //Leer datos del fichero
+      if (fgets(line, MAXCHAR, arg_pt->fp) == NULL){
+        break;
+      }
+
+      else{
+        //Escribir datos en num_flights
+        invalid = extract_fields_airport(origin, destination, line);
+
+        if (!invalid) {
+          index_origin = get_index_airport(origin, arg_pt->airports);
+          index_destination = get_index_airport(destination, arg_pt->airports);
+          
+          if ((index_origin >= 0) && (index_destination >= 0))
+            arg_pt->num_flights[index_origin][index_destination]++;
+        }
+      }
     }
+    pthread_mutex_unlock(&lock);
   }
-
-  fclose(fp);
+  return ((void *)0);
 }
 
 /**
@@ -296,15 +316,17 @@ void read_airports_data(int **num_flights, char **airports, char *fname)
  *    todas estas tareas.
  */
 
+
 int main(int argc, char **argv)
 {
   char **airports;
-  int **num_flights, err;
-  int i;
+  int ** num_flights, err, i;
   char line[MAXCHAR];
-  
-  pid_t pid;
+  FILE * fp;
+
   pthread_t ntid[F];
+  pthread_mutex_init(&lock, NULL);
+
 
   if (argc != 3) {
     printf("%s <airport.csv> <flights.csv>\n", argv[0]);
@@ -312,7 +334,6 @@ int main(int argc, char **argv)
   }
 
   struct timeval tv1, tv2;
-
   // Tiempo cronologico 
   gettimeofday(&tv1, NULL);
   
@@ -323,12 +344,22 @@ int main(int argc, char **argv)
   // Lee los codigos de los aeropuertos 
   read_airports(airports, argv[1]);
  
+ 
+
+
+  fp = fopen(argv[2], "r");
+  struct args args_pt;
+  args_pt.num_flights = num_flights;
+  args_pt.fp = fp;
+  args_pt.airports = airports;
   /* Leemos la cabecera del fichero */
   fgets(line, MAXCHAR, fp);
- 
+
+
+
   // Lee los datos de los vuelos
   for (i = 0; i < F; i++){
-    err = pthread_create(ntid+i, NULL, &read_airports_data, (void*)num_flights, (void*)airports, (void*)argv[2]);
+    err = pthread_create(ntid+i, NULL, read_airports_data, (void*) &args_pt);
     if (err != 0) {
       printf("no puc crear el fil.\n");
       exit(1);
@@ -336,25 +367,22 @@ int main(int argc, char **argv)
   }
 
   for (i = 0; i < F; i++){
-    if (pthread_join(ntid, NULL) != 0){
+    if (pthread_join(ntid[i], NULL) != 0){
       exit(2);
     }
     
   }
 
-
-
-  
-  read_airports_data(num_flights, airports, argv[2]);
-
   // Imprime un resumen de la tabla
   print_num_flights_summary(num_flights, airports);
-
+  //Cerrar fichero
+  fclose(fp);
   // Libera espacio
   free_matrix((void **) airports, NUM_AIRPORTS);
   free(airports);
   free_matrix((void **) num_flights, NUM_AIRPORTS);
   free(num_flights);
+  pthread_mutex_destroy(&lock);
   // Tiempo cronologico 
   gettimeofday(&tv2, NULL);
 
