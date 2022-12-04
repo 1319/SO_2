@@ -12,8 +12,12 @@
 
 #define COL_ORIGIN_AIRPORT 17
 #define COL_DESTINATION_AIRPORT 18
+
+//Número de hilos que se hacen
 #define F 2
-#define N 10
+
+//Numero de lineas que lee cada fichero
+#define N 10000
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -280,6 +284,8 @@ void* read_airports_data(void *arg)
      En caso de salirnos del fichero, paramos el bucle*/
 
   while (!feof(arg_pt->fp)){ //Repetir hasta que el fichero se acabe
+
+    //Entramos en la zona crítica
     pthread_mutex_lock(&lock);
     for (int i = 0; i < N; i++){
       //Leer datos del fichero
@@ -294,12 +300,14 @@ void* read_airports_data(void *arg)
         if (!invalid) {
           index_origin = get_index_airport(origin, arg_pt->airports);
           index_destination = get_index_airport(destination, arg_pt->airports);
-          
+
+          //Se escribe la lectura del fichero en num_flights
           if ((index_origin >= 0) && (index_destination >= 0))
             arg_pt->num_flights[index_origin][index_destination]++;
         }
       }
     }
+    //Salimos de la sección critica --> desbloqueamos
     pthread_mutex_unlock(&lock);
   }
   return ((void *)0);
